@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Automatic Content OCR (Mobile Hybrid Engine)
 // @namespace    http://tampermonkey.net/
-// @version      24.5.3-M-MultiMerge-AutoMerge-OverflowFix-ScrollFix-NoDim
-// @description  Adds a mobile-optimized OCR overlay with multi-select editing and automatic text merging. Allows scrolling when the overlay is active.
-// @author       1Selxo (Mobile port by Gemini, Hybrid Rendering & Editor by Gemini, Interaction Fixes by Gemini, Layout Fix by Gemini, Multi-Merge & Auto-Merge Port by Gemini, Scroll Fix by Gemini)
+// @version      24.5.4-M-Font-Engine-And-Minimal-Theme
+// @description  Adds a mobile-optimized OCR overlay with multi-select editing and automatic text merging. Features a high-performance rendering engine for optimal font sizing.
+// @author       1Selxo (Mobile port by Gemini, Hybrid Rendering & Editor by Gemini, Interaction Fixes by Gemini, Layout Fix by Gemini, Multi-Merge & Auto-Merge Port by Gemini, Scroll Fix by Gemini, Font Engine & Minimal Theme Port by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -60,7 +60,7 @@
         autoMergeMixedMinOverlapRatio: 0.5
     };
     let debugLog = [];
-    const SETTINGS_KEY = 'gemini_ocr_settings_v24.5.3_M_automerge';
+    const SETTINGS_KEY = 'gemini_ocr_settings_v24.5.4_M_font_engine';
     const ocrDataCache = new WeakMap();
     const managedElements = new Map();
     const managedContainers = new Map();
@@ -87,7 +87,8 @@
         purple: { main: 'rgba(155, 89, 182,', text: '#FFFFFF', highlightText: '#000000' },
         turquoise: { main: 'rgba(26, 188, 156,', text: '#FFFFFF', highlightText: '#000000' },
         pink: { main: 'rgba(232, 67, 147,', text: '#FFFFFF', highlightText: '#000000' },
-        grey: { main: 'rgba(149, 165, 166,', text: '#FFFFFF', highlightText: '#000000' }
+        grey: { main: 'rgba(149, 165, 166,', text: '#FFFFFF', highlightText: '#000000' },
+        minimal: { main: 'rgba(255, 0, 0,', text: 'transparent', highlightText: 'transparent' }
     };
 
     const logDebug = (message) => {
@@ -444,17 +445,18 @@
         if (!measurementSpan || !box || !imgRect || imgRect.width === 0 || imgRect.height === 0) return;
 
         const ocrData = box._ocrData;
-        const text = ocrData.text || '';
-        const availableWidth = (parseFloat(box.style.width) / 100) * imgRect.width + settings.boundingBoxAdjustment;
-        const availableHeight = (parseFloat(box.style.height) / 100) * imgRect.height + settings.boundingBoxAdjustment;
+        const text = box.textContent || '';
+        const availableWidth = box.offsetWidth + settings.boundingBoxAdjustment;
+        const availableHeight = box.offsetHeight + settings.boundingBoxAdjustment;
 
         if (!text || availableWidth <= 0 || availableHeight <= 0) return;
 
-        const isMerged = ocrData?.isMerged || text.includes('\u200B');
+        const isMerged = ocrData?.isMerged;
         const isMergedVertical = ocrData?.forcedOrientation === 'vertical';
 
         const findBestFitSize = (isVerticalSearch) => {
             measurementSpan.style.writingMode = isVerticalSearch ? 'vertical-rl' : 'horizontal-tb';
+
             if (isMerged) {
                 measurementSpan.innerHTML = box.innerHTML;
                 measurementSpan.style.whiteSpace = 'normal';
@@ -462,18 +464,33 @@
                 measurementSpan.textContent = text;
                 measurementSpan.style.whiteSpace = 'nowrap';
             }
+
             let low = 1, high = 200, bestSize = 1;
             while (low <= high) {
                 const mid = Math.floor((low + high) / 2);
                 if (mid <= 0) break;
+
                 measurementSpan.style.fontSize = `${mid}px`;
-                let textFits = (isMerged) ?
-                    (measurementSpan.offsetWidth <= availableWidth && measurementSpan.offsetHeight <= availableHeight) :
-                    (isVerticalSearch ? measurementSpan.offsetHeight <= availableHeight : measurementSpan.offsetWidth <= availableWidth);
-                if (textFits) { bestSize = mid; low = mid + 1; }
-                else { high = mid - 1; }
+
+                let textFits;
+                if (isVerticalSearch) {
+                    textFits = measurementSpan.offsetHeight <= availableHeight;
+                } else {
+                    textFits = measurementSpan.offsetWidth <= availableWidth;
+                }
+
+                if (textFits) {
+                    if (isMerged) {bestSize = mid * 0.8;}
+                    else {bestSize = mid}
+                    low = mid + 1;
+                } else {
+                    high = mid - 1;
+                }
             }
-            measurementSpan.style.whiteSpace = ''; measurementSpan.style.writingMode = ''; measurementSpan.innerHTML = '';
+
+            measurementSpan.style.whiteSpace = '';
+            measurementSpan.style.writingMode = '';
+            measurementSpan.innerHTML = '';
             return bestSize;
         };
 
@@ -481,23 +498,38 @@
         const verticalFitSize = findBestFitSize(true);
         let finalFontSize = 0, isVertical = false;
 
-        if (isMergedVertical) { isVertical = true; finalFontSize = verticalFitSize; }
-        else if (settings.textOrientation === 'forceVertical') { isVertical = true; finalFontSize = verticalFitSize; }
-        else if (settings.textOrientation === 'forceHorizontal') { isVertical = false; finalFontSize = horizontalFitSize; }
-        else { // Smart mode
-            if (verticalFitSize > horizontalFitSize) { isVertical = true; finalFontSize = verticalFitSize; }
-            else { isVertical = false; finalFontSize = horizontalFitSize; }
+        if (isMergedVertical) {
+            isVertical = true;
+            finalFontSize = verticalFitSize;
+        } else if (settings.textOrientation === 'forceVertical') {
+            isVertical = true;
+            finalFontSize = verticalFitSize;
+        } else if (settings.textOrientation === 'forceHorizontal') {
+            isVertical = false;
+            finalFontSize = horizontalFitSize;
+        } else { // Smart mode
+            if (verticalFitSize > horizontalFitSize) {
+                isVertical = true;
+                finalFontSize = verticalFitSize;
+            } else {
+                isVertical = false;
+                finalFontSize = horizontalFitSize;
+            }
         }
         const multiplier = isVertical ? settings.fontMultiplierVertical : settings.fontMultiplierHorizontal;
         box.style.fontSize = `${finalFontSize * multiplier}px`;
         box.classList.toggle('gemini-ocr-text-vertical', isVertical);
+
+        if (!isMerged) {
+            box.style.whiteSpace = 'nowrap';
+        }
     }
     function calculateAndApplyOptimalStyles_Optimized(overlay, imgRect) {
         if (!measurementSpan || imgRect.width === 0 || imgRect.height === 0) return;
         const boxes = Array.from(overlay.querySelectorAll('.gemini-ocr-text-box'));
         if (boxes.length === 0) return;
         const baseStyle = getComputedStyle(boxes[0]);
-        Object.assign(measurementSpan.style, { fontFamily: baseStyle.fontFamily, fontWeight: baseStyle.fontWeight, letterSpacing: baseStyle.letterSpacing });
+        Object.assign(measurementSpan.style, { fontFamily: baseStyle.fontFamily, fontWeight: baseStyle.fontWeight, letterSpacing: baseStyle.letterSpacing, fontSize: '100px' });
         for (const box of boxes) { calculateAndApplyStylesForSingleBox(box, imgRect); }
         measurementSpan.style.writingMode = 'horizontal-tb';
     }
@@ -726,6 +758,9 @@
         let styleTag = document.getElementById('gemini-ocr-dynamic-styles');
         if (!styleTag) { styleTag = document.createElement('style'); styleTag.id = 'gemini-ocr-dynamic-styles'; document.head.appendChild(styleTag); }
         styleTag.textContent = cssVars;
+
+        document.body.className = document.body.className.replace(/\bocr-theme-\S+/g, '');
+        document.body.classList.add(`ocr-theme-${settings.colorTheme}`);
     }
     function createUI() {
         GM_addStyle(`
@@ -738,6 +773,18 @@
 .is-focused:not(.edit-mode-active) .gemini-ocr-text-box.manual-highlight, .is-focused .selected-for-merge { overflow: visible !important; transform: scale(var(--ocr-focus-scale, 1.05)); background: var(--ocr-highlight-bg-color); border-color: var(--ocr-highlight-border-color); color: var(--ocr-highlight-text-color); text-shadow: none; box-shadow: var(--ocr-highlight-shadow), var(--ocr-highlight-inset-shadow); z-index: 9999; opacity: 1; }
 .is-focused.has-manual-highlight:not(.edit-mode-active) .gemini-ocr-text-box:not(.manual-highlight) { opacity: var(--ocr-dimmed-opacity); }
 .solo-hover-mode.is-focused .gemini-ocr-text-box { opacity: 0; } .solo-hover-mode.is-focused .gemini-ocr-text-box.manual-highlight, .solo-hover-mode.is-focused .gemini-ocr-text-box.selected-for-merge { opacity: 1; }
+
+/* --- Minimal Theme --- */
+body.ocr-theme-minimal ::selection { background-color: rgba(0, 123, 255, 0.2); color: transparent; }
+body.ocr-theme-minimal .gemini-ocr-text-box {
+    background: transparent !important; color: transparent !important; border: 1px solid rgba(255, 0, 0, 0.2) !important;
+    backdrop-filter: none !important; text-shadow: none !important; box-shadow: none !important; transform: none !important;
+}
+body.ocr-theme-minimal .is-focused .gemini-ocr-text-box.manual-highlight,
+body.ocr-theme-minimal .is-focused .gemini-ocr-text-box.selected-for-merge {
+    background: rgba(255, 0, 0, 0.1) !important;
+    border-color: rgba(255, 0, 0, 0.5) !important;
+}
 
 /* --- Editor UI --- */
 .gemini-ocr-editor-controls { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); z-index: 10000; display: none; gap: 10px; }
