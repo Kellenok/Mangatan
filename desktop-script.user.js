@@ -1,3 +1,20 @@
+// ==UserScript==
+// @name         Automatic Content OCR (PC Hybrid Engine)
+// @namespace    http://tampermonkey.net/
+// @version      24.5.9-Scroll-And-Minimal-Fix
+// @description  Adds a stable, inline OCR button with hotkey-based editing. Features a high-performance hybrid rendering engine for perfectly smooth scrolling and advanced grouping.
+// @author       1Selxo (Probe Engine Port by Gemini, Hybrid Rendering & Hotkeys by Gemini, Hover Fix by Gemini, Merge-Space & Merge-Bugfix by Gemini, Multi-Merge & Auto-Merge by Gemini, Group-Merge & Theme-Update by Gemini)
+// @match        *://127.0.0.1*/*
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @grant        GM_addStyle
+// @grant        GM_xmlhttpRequest
+// @connect      127.0.0.1
+// @connect      localhost
+// @downloadURL  https://github.com/kaihouguide/Mangatan/raw/main/desktop-script.user.js
+// @updateURL    https://github.com/kaihouguide/Mangatan/raw/main/desktop-script.user.js
+// ==/UserScript==
+
 (function() {
     'use strict';
     let settings = {
