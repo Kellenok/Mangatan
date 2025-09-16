@@ -19,9 +19,6 @@ from waitress import serve
 
 # region Config
 
-IP_ADDRESS = "127.0.0.1"
-PORT = 3000
-
 CACHE_FILE_PATH = os.path.join(os.getcwd(), "ocr-cache.json")
 UPLOAD_FOLDER = "uploads"
 IMAGE_CACHE_FOLDER = "image_cache"
@@ -191,9 +188,45 @@ async def ocr_endpoint():
 
         pil_image = Image.open(io.BytesIO(image_bytes))
         rgb_image = pil_image.convert("RGB")
+        
+        MAX_HEIGHT = 3000
+        full_image_width, full_image_height = rgb_image.size
+        results = []
 
-        results = await ocr_engine.ocr(rgb_image)
+        if full_image_height > MAX_HEIGHT:
+            print(f"[OCR] Image is too tall ({full_image_height}px). Splitting into chunks.")
+            y_offset = 0
 
+            while y_offset < full_image_height:
+                box = (0, y_offset, full_image_width, min(y_offset + MAX_HEIGHT, full_image_height))
+                
+                chunk_image = rgb_image.crop(box)
+                chunk_width, chunk_height = chunk_image.size
+                print(f"[OCR] Processing chunk at y-offset: {y_offset} (size: {chunk_width}x{chunk_height})")
+
+                chunk_results = await ocr_engine.ocr(chunk_image)
+
+                for result in chunk_results:
+                    bbox = result['tightBoundingBox']
+
+                    x_local_px = bbox['x'] * chunk_width
+                    y_local_px = bbox['y'] * chunk_height
+                    width_px = bbox['width'] * chunk_width
+                    height_px = bbox['height'] * chunk_height
+
+                    y_global_px = y_local_px + y_offset
+                    final_bbox = {
+                        'x': x_local_px / full_image_width,
+                        'y': y_global_px / full_image_height,
+                        'width': width_px / full_image_width,
+                        'height': height_px / full_image_height
+                    }
+                    result['tightBoundingBox'] = final_bbox
+                    results.append(result)
+
+                y_offset += MAX_HEIGHT
+        else:
+            results = await ocr_engine.ocr(rgb_image)
         with cache_lock:
             ocr_cache[image_url] = results
             ocr_requests_processed += 1
@@ -212,7 +245,6 @@ async def ocr_endpoint():
         if is_debug_mode:
             traceback.print_exc()
         return jsonify({"error": f"An unexpected error occurred: {e}"}), 500
-
 
 @app.route("/preprocess-chapter", methods=["POST"])
 def preprocess_chapter_endpoint():
@@ -330,11 +362,11 @@ def main():
 
     if is_debug_mode:
         print("--- Starting Flask Development Server in DEBUG MODE ---")
-        app.run(host=IP_ADDRESS, port=PORT, debug=True, use_reloader=False)
+        app.run(host="0.0.0.0", port=3000, debug=True, use_reloader=False)
     else:
         print("--- Starting Waitress Production Server ---")
-        print(f"URL: http://{IP_ADDRESS}:{PORT}")
-        serve(app, host=IP_ADDRESS, port=PORT)
+        print(f"URL: http://127.0.0.1:3000")
+        serve(app, host="0.0.0.0", port=3000)
 
 
 if __name__ == "__main__":
