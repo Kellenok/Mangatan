@@ -1,23 +1,5 @@
-// ==UserScript==
-// @name         Automatic Content OCR (PC Hybrid Engine)
-// @namespace    http://tampermonkey.net/
-// @version      24.5.9-Scroll-And-Minimal-Fix
-// @description  Adds a stable, inline OCR button with hotkey-based editing. Features a high-performance hybrid rendering engine for perfectly smooth scrolling and advanced grouping.
-// @author       1Selxo (Probe Engine Port by Gemini, Hybrid Rendering & Hotkeys by Gemini, Hover Fix by Gemini, Merge-Space & Merge-Bugfix by Gemini, Multi-Merge & Auto-Merge by Gemini, Group-Merge & Theme-Update by Gemini)
-// @match        *://127.0.0.1*/*
-// @grant        GM_setValue
-// @grant        GM_getValue
-// @grant        GM_addStyle
-// @grant        GM_xmlhttpRequest
-// @connect      127.0.0.1
-// @connect      localhost
-// @downloadURL  https://github.com/kaihouguide/Mangatan/raw/main/desktop-script.user.js
-// @updateURL    https://github.com/kaihouguide/Mangatan/raw/main/desktop-script.user.js
-// ==/UserScript==
-
 (function() {
     'use strict';
-    // --- Global State and Settings ---
     let settings = {
         ocrServerUrl: 'http://127.0.0.1:3000',
         imageServerUser: '',
@@ -27,14 +9,14 @@
         sites: [{
             urlPattern: '127.0.0.1',
             imageContainerSelectors: [
-                'div.muiltr-masn8', // Old Continuous Vertical
-                'div.muiltr-79elbk', // Webtoon
-                'div.muiltr-u43rde', // Single Page
-                'div.muiltr-1r1or1s', // Double Page
-                'div.muiltr-18sieki', // New Continuous Vertical
-                'div.muiltr-cns6dc', // Added per request
-                '.MuiBox-root.muiltr-1noqzsz', // RTL Continuous Vertical (FIXED)
-                '.MuiBox-root.muiltr-1tapw32' // RTL Double Page
+                'div.muiltr-masn8',
+                'div.muiltr-79elbk',
+                'div.muiltr-u43rde',
+                'div.muiltr-1r1or1s',
+                'div.muiltr-18sieki',
+                'div.muiltr-cns6dc',
+                '.MuiBox-root.muiltr-1noqzsz',
+                '.MuiBox-root.muiltr-1tapw32'
             ],
             overflowFixSelector: '.MuiBox-root.muiltr-13djdhf'
         }],
@@ -51,7 +33,6 @@
         deleteModifierKey: 'Alt',
         addSpaceOnMerge: false,
         colorTheme: 'deepblue',
-        // Auto-Merge Settings
         autoMergeEnabled: true,
         autoMergeDistK: 1.2,
         autoMergeFontRatio: 1.3,
@@ -74,7 +55,6 @@
     let hideButtonTimer = null;
     const activeMergeSelections = new Map();
 
-    // --- Hybrid Render Engine State ---
     let resizeObserver;
     let intersectionObserver;
     const visibleImages = new Set();
@@ -100,7 +80,6 @@
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
 
-    // --- Hybrid Render Engine Core ---
     function updateVisibleOverlaysPosition() {
         for (const img of visibleImages) {
             const state = managedElements.get(img);
@@ -182,7 +161,6 @@
         }
     };
 
-    // --- Core Observation Logic ---
     const imageObserver = new MutationObserver((mutations) => {
         for (const mutation of mutations) for (const node of mutation.addedNodes) if (node.nodeType === 1) {
             if (node.tagName === 'IMG') observeImageForSrcChange(node);
@@ -233,7 +211,6 @@
         }
     }
 
-    // --- Image Handling Logic ---
     function observeImageForSrcChange(img) {
         const processTheImage = (src) => {
             if (src?.includes('/api/v1/manga/')) {
@@ -354,7 +331,7 @@
         } else if (settings.textOrientation === 'forceHorizontal') {
             isVertical = false;
             finalFontSize = horizontalFitSize;
-        } else { // Smart mode
+        } else {
             if (verticalFitSize > horizontalFitSize) {
                 isVertical = true;
                 finalFontSize = verticalFitSize;
@@ -381,7 +358,6 @@
         measurementSpan.style.writingMode = 'horizontal-tb';
     }
 
-    // --- Auto-Merging Algorithm ---
     class UnionFind {
         constructor(size) { this.parent = Array.from({ length: size }, (_, i) => i); this.rank = Array(size).fill(0); }
         find(i) { if (this.parent[i] === i) return i; return this.parent[i] = this.find(this.parent[i]); }
@@ -392,12 +368,11 @@
         if (!lines || lines.length < 2 || !naturalWidth || !naturalHeight) return lines.map(line => [line]);
 
         const CHUNK_MAX_HEIGHT = 3000;
-        // Шаг 1: Создаём ОБРАБАТЫВАЕМЫЕ данные с ТОЧНЫМИ, нормализованными координатами
         const processedLines = lines.map((line, index) => {
             const bbox = line.tightBoundingBox;
             const pixelTop = bbox.y * naturalHeight;
             const pixelBottom = (bbox.y + bbox.height) * naturalHeight;
-            const normScale = 1000 / naturalWidth; // Коэффициент для точности
+            const normScale = 1000 / naturalWidth;
             const normalizedBbox = {
                 x: (bbox.x * naturalWidth) * normScale,
                 y: (bbox.y * naturalHeight) * normScale,
@@ -408,7 +383,6 @@
             normalizedBbox.bottom = normalizedBbox.y + normalizedBbox.height;
             const isVertical = normalizedBbox.width <= normalizedBbox.height;
             const fontSize = isVertical ? normalizedBbox.width : normalizedBbox.height;
-            // Сохраняем и исходный индекс, и точные координаты
             return { originalIndex: index, isVertical, fontSize, bbox: normalizedBbox, pixelTop, pixelBottom };
         });
 
@@ -434,7 +408,6 @@
             const chunkLines = processedLines.slice(chunkStartIndex, chunkEndIndex + 1);
             const uf = new UnionFind(chunkLines.length);
 
-            // ... (вся логика UnionFind для поиска групп остаётся без изменений, она уже использует точные `bbox`)
             const horizontalLines = chunkLines.filter(l => !l.isVertical), verticalLines = chunkLines.filter(l => l.isVertical);
             const median = (arr) => { if (arr.length === 0) return 0; const sorted = [...arr].sort((a, b) => a - b); const mid = Math.floor(sorted.length / 2); return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2; };
             const initialMedianLineHeight = median(horizontalLines.map(l => l.bbox.height)); const initialMedianLineWidth = median(verticalLines.map(l => l.bbox.width));
@@ -442,20 +415,18 @@
             const robustMedianLineHeight = median(primaryHorizontalLines.map(l => l.bbox.height)) || initialMedianLineHeight || 20; const robustMedianLineWidth = median(primaryVerticalLines.map(l => l.bbox.width)) || initialMedianLineWidth || 20;
             for (let i = 0; i < chunkLines.length; i++) { for (let j = i + 1; j < chunkLines.length; j++) { const lineA = chunkLines[i], lineB = chunkLines[j]; if (lineA.isVertical !== lineB.isVertical) continue; const isLineAPrimary = lineA.fontSize >= (lineA.isVertical ? robustMedianLineWidth : robustMedianLineHeight) * settings.autoMergeMinLineRatio; const isLineBPrimary = lineB.fontSize >= (lineB.isVertical ? robustMedianLineWidth : robustMedianLineHeight) * settings.autoMergeMinLineRatio; let currentFontRatioThreshold = settings.autoMergeFontRatio; if ((isLineAPrimary && !isLineBPrimary) || (!isLineAPrimary && isLineBPrimary)) currentFontRatioThreshold = settings.autoMergeFontRatioForMixed; const fontRatio = Math.max(lineA.fontSize / lineB.fontSize, lineB.fontSize / lineA.fontSize); if (fontRatio > currentFontRatioThreshold) continue; const distThreshold = lineA.isVertical ? (settings.autoMergeDistK * robustMedianLineWidth) : (settings.autoMergeDistK * robustMedianLineHeight); let readingGap, perpOverlap; if (lineA.isVertical) { readingGap = Math.max(0, Math.max(lineA.bbox.x, lineB.bbox.x) - Math.min(lineA.bbox.right, lineB.bbox.right)); perpOverlap = Math.max(0, Math.min(lineA.bbox.bottom, lineB.bbox.bottom) - Math.max(lineA.bbox.y, lineB.bbox.y)); } else { readingGap = Math.max(0, Math.max(lineA.bbox.y, lineB.bbox.y) - Math.min(lineA.bbox.bottom, lineB.bbox.bottom)); perpOverlap = Math.max(0, Math.min(lineA.bbox.right, lineB.bbox.right) - Math.max(lineA.bbox.x, lineB.bbox.x)); } const smallerPerpSize = Math.min(lineA.isVertical ? lineA.bbox.height : lineA.bbox.width, lineA.isVertical ? lineB.bbox.height : lineB.bbox.width); if (readingGap > distThreshold) continue; if (perpOverlap / smallerPerpSize < settings.autoMergeOverlapMin) continue; if (((isLineAPrimary && !isLineBPrimary) || (!isLineAPrimary && isLineBPrimary)) && (perpOverlap / smallerPerpSize < settings.autoMergeMixedMinOverlapRatio)) continue; uf.union(i, j); } }
 
-            // Шаг 2: Группируем ОБРАБАТЫВАЕМЫЕ данные, а не исходные
             const tempGroups = {};
             for (let i = 0; i < chunkLines.length; i++) {
                 const root = uf.find(i);
                 if (!tempGroups[root]) tempGroups[root] = [];
-                tempGroups[root].push(chunkLines[i]); // Кладём объект с точными данными
+                tempGroups[root].push(chunkLines[i]);
             }
 
-            // Шаг 3: Сортируем группы, используя ТОЧНЫЕ координаты из `bbox`
             const sortedTempGroups = Object.values(tempGroups).map(group => {
                 if (group.length < 2) return group;
 
                 const groupBBox = group.reduce((acc, item) => {
-                    const b = item.bbox; // Используем точные данные
+                    const b = item.bbox;
                     if (b.x < acc.x1) acc.x1 = b.x; if (b.y < acc.y1) acc.y1 = b.y;
                     if (b.right > acc.x2) acc.x2 = b.right; if (b.bottom > acc.y2) acc.y2 = b.bottom;
                     return acc;
@@ -463,8 +434,8 @@
                 const isVerticalGroup = (groupBBox.y2 - groupBBox.y1) > (groupBBox.x2 - groupBBox.x1);
 
                 group.sort((a, b) => {
-                    const bA = a.bbox; // Сортируем по ТОЧНЫМ данным
-                    const bB = b.bbox; // Сортируем по ТОЧНЫМ данным
+                    const bA = a.bbox;
+                    const bB = b.bbox;
                     if (isVerticalGroup) {
                         const xDiff = bB.x - bA.x;
                         return Math.abs(xDiff) > 0.1 ? xDiff : bA.y - bB.y;
@@ -476,7 +447,6 @@
                 return group;
             });
 
-            // Шаг 4: Преобразуем отсортированные группы обратно в исходный формат данных
             const finalGroupsInChunk = sortedTempGroups.map(group =>
                 group.map(processedLine => lines[processedLine.originalIndex])
             );
@@ -488,7 +458,6 @@
         logDebug(`Auto-Merge finished. Initial: ${lines.length}, Final groups: ${allMergedGroups.length} (processed in ${chunksProcessed} chunk(s))`);
         return allMergedGroups;
     }
-    // --- Display & Interaction Logic ---
     function displayOcrResults(targetImg) {
         if (managedElements.has(targetImg)) return;
         let data = ocrDataCache.get(targetImg);
@@ -608,7 +577,6 @@
     }
 
 
-    // --- Hotkey-Based Editor Logic ---
     function isModifierPressed(event, keyName) {
         if (!keyName) return false;
         const lowerKey = keyName.toLowerCase();
@@ -662,18 +630,16 @@
         }
         logDebug(`Manually merging ${selectedGroups.length} groups.`);
 
-        // Находим исходное изображение, чтобы получить его точные размеры
         const [sourceImage] = [...managedElements].find(([, state]) => state.overlay === overlay) || [];
         if (!sourceImage || !sourceImage.naturalWidth) {
             logDebug("Merge failed: Could not find source image for precise calculations.");
             return;
         }
         const { naturalWidth, naturalHeight } = sourceImage;
-        const normScale = 1000 / naturalWidth; // Тот же коэффициент для точности
+        const normScale = 1000 / naturalWidth;
 
         const allBoxElements = selectedGroups.flatMap(g => Array.from(g.querySelectorAll('.gemini-ocr-text-box')));
 
-        // Шаг 1: Создаём временный массив объектов с ТОЧНЫМИ координатами для каждого блока
         const boxesWithPreciseCoords = allBoxElements.map(box => {
             const rawBbox = box._ocrData.tightBoundingBox;
             const preciseBbox = {
@@ -684,10 +650,9 @@
             };
             preciseBbox.right = preciseBbox.x + preciseBbox.width;
             preciseBbox.bottom = preciseBbox.y + preciseBbox.height;
-            return { element: box, bbox: preciseBbox }; // Связываем DOM-элемент с его точными данными
+            return { element: box, bbox: preciseBbox };
         });
 
-        // Шаг 2: Вычисляем общие границы новой группы, используя ТОЧНЫЕ координаты
         const groupPreciseBBox = boxesWithPreciseCoords.reduce((acc, item) => {
             const b = item.bbox;
             if (b.x < acc.x1) acc.x1 = b.x;
@@ -697,7 +662,6 @@
             return acc;
         }, { x1: Infinity, y1: Infinity, x2: -Infinity, y2: -Infinity });
 
-        // Конвертируем точные общие границы обратно в проценты для CSS
         const groupFinalBBox = {
             x: (groupPreciseBBox.x1 / normScale) / naturalWidth,
             y: (groupPreciseBBox.y1 / normScale) / naturalHeight,
@@ -710,13 +674,12 @@
             return;
         }
 
-        // Шаг 3: Определяем ориентацию и сортируем, используя ТОЧНЫЕ координаты
         const isVerticalGroup = (groupPreciseBBox.y2 - groupPreciseBBox.y1) > (groupPreciseBBox.x2 - groupPreciseBBox.x1);
         logDebug(`Manual group orientation: ${isVerticalGroup ? 'Vertical' : 'Horizontal'}. Applying reference sort...`);
 
         boxesWithPreciseCoords.sort((a, b) => {
-            const bA = a.bbox; // Сортируем по ТОЧНЫМ данным
-            const bB = b.bbox; // Сортируем по ТОЧНЫМ данным
+            const bA = a.bbox;
+            const bB = b.bbox;
             if (isVerticalGroup) {
                 const xDiff = bB.x - bA.x;
                 return Math.abs(xDiff) > 0.1 ? xDiff : bA.y - bB.y;
@@ -726,7 +689,6 @@
             }
         });
 
-        // Шаг 4: Создаём новый контейнер группы и добавляем в него отсортированные элементы
         const newGroupWrapper = document.createElement('div');
         newGroupWrapper.className = 'gemini-ocr-group';
         Object.assign(newGroupWrapper.style, {
@@ -736,7 +698,7 @@
 
         boxesWithPreciseCoords.forEach(item => {
             const box = item.element;
-            const itemBBox = box._ocrData.tightBoundingBox; // Исходные %-координаты для вычисления относительной позиции
+            const itemBBox = box._ocrData.tightBoundingBox;
             const relativeLeft = (itemBBox.x - groupFinalBBox.x) / groupFinalBBox.width;
             const relativeTop = (itemBBox.y - groupFinalBBox.y) / groupFinalBBox.height;
             const relativeWidth = itemBBox.width / groupFinalBBox.width;
@@ -753,7 +715,6 @@
         logDebug(`Merge complete. New group contains ${allBoxElements.length} text boxes.`);
     }
 
-    // --- Anki & Batch Processing ---
     async function ankiConnectRequest(action, params = {}) {
         return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
@@ -822,7 +783,6 @@
         actionContainer.insertBefore(ocrButton, moreButton);
     }
 
-    // --- UI, Styles and Initialization ---
     function manageScrollFix() {
         const urlPattern = '/manga/', shouldBeActive = window.location.href.includes(urlPattern), isActive = document.documentElement.classList.contains('ocr-scroll-fix-active');
         if (shouldBeActive && !isActive) document.documentElement.classList.add('ocr-scroll-fix-active');
@@ -844,22 +804,20 @@
         GM_addStyle(`
             html.ocr-scroll-fix-active { overflow: hidden !important; } html.ocr-scroll-fix-active body { overflow-y: auto !important; overflow-x: hidden !important; }
 
-            /* --- Overlay & Interaction Fix --- */
             .gemini-ocr-decoupled-overlay {
                 position: fixed; z-index: 9998;
                 opacity: 0; visibility: hidden;
-                pointer-events: none; /* Let scroll and clicks pass through the main container */
+                pointer-events: none;
                 transition: opacity 0.2s, visibility 0.2s;
             }
             .gemini-ocr-decoupled-overlay.is-focused {
                 opacity: 1; visibility: visible;
             }
             .gemini-ocr-group {
-                pointer-events: auto; /* Groups are interactive for hover */
+                pointer-events: auto;
                 position: absolute; box-sizing: border-box; transition: opacity 0.2s;
             }
 
-            /* --- Text Box Styling --- */
             .gemini-ocr-text-box {
                 position: absolute; display: flex; align-items: center; justify-content: center; text-align: center;
                 box-sizing: border-box; user-select: text; cursor: pointer; transition: all 0.2s ease-in-out;
@@ -870,7 +828,6 @@
             }
             .gemini-ocr-text-vertical { writing-mode: vertical-rl; text-orientation: upright; }
 
-            /* --- Highlighting and Dimming --- */
             body:not(.ocr-edit-mode-active) .interaction-mode-hover.is-focused .gemini-ocr-group:hover .gemini-ocr-text-box,
             body:not(.ocr-edit-mode-active) .interaction-mode-click.is-focused .gemini-ocr-text-box.manual-highlight {
                 transform: scale(var(--ocr-focus-scale)); background: var(--ocr-highlight-bg-color);
@@ -888,12 +845,10 @@
                  background: rgba(10,25,40,0.5); border-color: var(--ocr-border-color-dim);
             }
 
-            /* --- Solo Hover Mode --- */
             .solo-hover-mode.is-focused .gemini-ocr-group { opacity: 0; }
             .solo-hover-mode.is-focused .gemini-ocr-group:hover,
             .solo-hover-mode.is-focused .gemini-ocr-group.selected-for-merge { opacity: 1; }
 
-            /* --- Minimal Theme (Corrected) --- */
             body.ocr-theme-minimal ::selection { background-color: rgba(0, 123, 255, 0.2); color: transparent; }
             body.ocr-theme-minimal .gemini-ocr-decoupled-overlay.is-focused .gemini-ocr-group {
                  border: 1px solid rgba(255, 0, 0, 0.2);
@@ -909,12 +864,10 @@
             }
 
 
-            /* --- Merge Mode --- */
             .gemini-ocr-group.selected-for-merge {
                 outline: 3px solid #f1c40f !important; outline-offset: 2px; box-shadow: 0 0 12px #f1c40f;
             }
 
-            /* --- Misc UI --- */
             .gemini-ocr-chapter-batch-btn { font-family: "Roboto","Helvetica","Arial",sans-serif; font-weight: 500; font-size: 0.75rem; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(240,153,136,0.5); color: #f09988; background-color: transparent; cursor: pointer; margin-right: 4px; transition: all 150ms; min-width: 80px; text-align: center; } .gemini-ocr-chapter-batch-btn:hover { background-color: rgba(240,153,136,0.08); } .gemini-ocr-chapter-batch-btn:disabled { color: grey; border-color: grey; cursor: wait; } #gemini-ocr-settings-button { position: fixed; bottom: 15px; right: 15px; z-index: 2147483647; background: #1A1D21; color: #EAEAEA; border: 1px solid #555; border-radius: 50%; width: 50px; height: 50px; font-size: 26px; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.5); user-select: none; } #gemini-ocr-global-anki-export-btn { position: fixed; bottom: 75px; right: 15px; z-index: 2147483646; background-color: #2ecc71; color: white; border: 1px solid white; border-radius: 50%; width: 50px; height: 50px; font-size: 30px; line-height: 50px; text-align: center; cursor: pointer; transition: all 0.2s; user-select: none; box-shadow: 0 4px 12px rgba(0,0,0,0.5); } #gemini-ocr-global-anki-export-btn:hover { background-color: #27ae60; transform: scale(1.1); } #gemini-ocr-global-anki-export-btn:disabled { background-color: #95a5a6; cursor: wait; transform: none; } #gemini-ocr-global-anki-export-btn.is-hidden { opacity: 0; visibility: hidden; pointer-events: none; transform: scale(0.5); } .gemini-ocr-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background-color: #1A1D21; border: 1px solid var(--modal-header-color); border-radius: 15px; z-index: 2147483647; color: #EAEAEA; font-family: sans-serif; box-shadow: 0 8px 32px 0 rgba(0,0,0,0.5); width: 600px; max-width: 90vw; max-height: 90vh; display: flex; flex-direction: column; } .gemini-ocr-modal.is-hidden { display: none; } .gemini-ocr-modal-header { padding: 20px 25px; border-bottom: 1px solid #444; } .gemini-ocr-modal-header h2 { margin: 0; color: var(--modal-header-color); } .gemini-ocr-modal-content { padding: 10px 25px; overflow-y: auto; flex-grow: 1; } .gemini-ocr-modal-footer { padding: 15px 25px; border-top: 1px solid #444; display: flex; justify-content: flex-start; gap: 10px; align-items: center; } .gemini-ocr-modal-footer button:last-of-type { margin-left: auto; } .gemini-ocr-modal h3 { font-size: 1.1em; margin: 15px 0 10px 0; border-bottom: 1px solid #333; padding-bottom: 5px; color: var(--modal-header-color); } .gemini-ocr-settings-grid { display: grid; grid-template-columns: max-content 1fr; gap: 10px 15px; align-items: center; } .full-width { grid-column: 1 / -1; } .gemini-ocr-modal input, .gemini-ocr-modal textarea, .gemini-ocr-modal select { width: 100%; padding: 8px; box-sizing: border-box; font-family: monospace; background-color: #2a2a2e; border: 1px solid #555; border-radius: 5px; color: #EAEAEA; } .gemini-ocr-modal button { padding: 10px 18px; border: none; border-radius: 5px; color: #1A1D21; cursor: pointer; font-weight: bold; } #gemini-ocr-server-status { padding: 10px; border-radius: 5px; text-align: center; cursor: pointer; transition: background-color: 0.3s; } #gemini-ocr-server-status.status-ok { background-color: #27ae60; } #gemini-ocr-server-status.status-error { background-color: #c0392b; } #gemini-ocr-server-status.status-checking { background-color: #3498db; }
         `);
         document.body.insertAdjacentHTML('beforeend', ` <button id="gemini-ocr-global-anki-export-btn" class="is-hidden" title="Export Screenshot to Anki">✚</button> <button id="gemini-ocr-settings-button">⚙️</button> <div id="gemini-ocr-settings-modal" class="gemini-ocr-modal is-hidden"> <div class="gemini-ocr-modal-header"><h2>Automatic Content OCR Settings (PC Hybrid)</h2></div> <div class="gemini-ocr-modal-content"> <h3>OCR & Image Source</h3><div class="gemini-ocr-settings-grid full-width"> <label for="gemini-ocr-server-url">OCR Server URL:</label><input type="text" id="gemini-ocr-server-url"> <label for="gemini-image-server-user">Image Source Username:</label><input type="text" id="gemini-image-server-user" autocomplete="username" placeholder="Optional"> <label for="gemini-image-server-password">Image Source Password:</label><input type="password" id="gemini-image-server-password" autocomplete="current-password" placeholder="Optional"> </div> <div id="gemini-ocr-server-status" class="full-width" style="margin-top: 10px;">Click to check server status</div> <h3>Anki Integration</h3><div class="gemini-ocr-settings-grid"> <label for="gemini-ocr-anki-url">Anki-Connect URL:</label><input type="text" id="gemini-ocr-anki-url"> <label for="gemini-ocr-anki-field">Image Field Name:</label><input type="text" id="gemini-ocr-anki-field" placeholder="e.g., Image"> </div> <h3>Interaction & Display</h3><div class="gemini-ocr-settings-grid"> <label for="ocr-color-theme">Color Theme:</label><select id="ocr-color-theme">${Object.keys(COLOR_THEMES).map(t=>`<option value="${t}">${t.charAt(0).toUpperCase()+t.slice(1)}</option>`).join('')}</select> <label for="ocr-interaction-mode">Highlight Mode:</label><select id="ocr-interaction-mode"><option value="hover">On Hover</option><option value="click">On Click</option></select> <label for="ocr-dimmed-opacity">Dimmed Box Opacity (%):</label><input type="number" id="ocr-dimmed-opacity" min="0" max="100" step="5"> <label for="ocr-focus-scale-multiplier">Focus Scale Multiplier:</label><input type="number" id="ocr-focus-scale-multiplier" min="1" max="3" step="0.05"> <label for="ocr-merge-key">Merge Modifier Key:</label><input type="text" id="ocr-merge-key" placeholder="Control, Alt, Shift..."> <label for="ocr-delete-key">Delete Modifier Key:</label><input type="text" id="ocr-delete-key" placeholder="Control, Alt, Shift..."> <label for="ocr-text-orientation">Text Orientation:</label><select id="ocr-text-orientation"><option value="smart">Smart</option><option value="serverAngle">Server Angle</option><option value="forceHorizontal">Horizontal</option><option value="forceVertical">Vertical</option></select> <label for="ocr-font-multiplier-horizontal">H. Font Multiplier:</label><input type="number" id="ocr-font-multiplier-horizontal" min="0.1" max="5" step="0.1"> <label for="ocr-font-multiplier-vertical">V. Font Multiplier:</label><input type="number" id="ocr-font-multiplier-vertical" min="0.1" max="5" step="0.1"> <label for="ocr-bounding-box-adjustment-input">Box Adjustment (px):</label><input type="number" id="ocr-bounding-box-adjustment-input" min="0" max="100" step="1"> </div><div class="gemini-ocr-settings-grid full-width"><label><input type="checkbox" id="gemini-ocr-solo-hover-mode"> Only show hovered box</label></div> <h3>Auto-Merging (Experimental)</h3><div class="gemini-ocr-settings-grid full-width"><label><input type="checkbox" id="gemini-ocr-auto-merge-enabled"> Enable Automatic Bubble Merging</label></div><div class="gemini-ocr-settings-grid"><label for="ocr-auto-merge-dist-k" title="Multiplier for median line height/width to determine max distance. (Default: 1.2)">Distance K:</label><input type="number" id="ocr-auto-merge-dist-k" min="0.1" max="5" step="0.1"><label for="ocr-auto-merge-font-ratio" title="Max allowed font size difference ratio. (Default: 1.2 means 20% diff)">Font Ratio:</label><input type="number" id="ocr-auto-merge-font-ratio" min="1" max="3" step="0.05"><label for="ocr-auto-merge-perp-tol" title="Multiplier for median line height/width for perpendicular alignment tolerance. (Default: 0.8)">Perp. Tolerance:</label><input type="number" id="ocr-auto-merge-perp-tol" min="0.1" max="3" step="0.1"><label for="ocr-auto-merge-overlap-min" title="Minimum required perpendicular overlap if alignment tolerance is not met. (Default: 0.1)">Min Overlap:</label><input type="number" id="ocr-auto-merge-overlap-min" min="0" max="1" step="0.05"><label for="ocr-auto-merge-min-line-ratio" title="Minimum size ratio (relative to robust median) for a line to be considered 'primary'. Used for robust median calculation and mixed-type merge conditions. (Default: 0.5)">Min Primary Ratio:</label><input type="number" id="ocr-auto-merge-min-line-ratio" min="0.1" max="1" step="0.05"><label for="ocr-auto-merge-font-ratio-mixed" title="Stricter font ratio for merging a 'primary' line with a 'secondary' line. (Default: 1.1)">Mixed Font Ratio:</label><input type="number" id="ocr-auto-merge-font-ratio-mixed" min="1" max="2" step="0.05"> <label for="ocr-auto-merge-mixed-min-overlap-ratio" title="Minimum perpendicular overlap (as ratio of smaller line's perpendicular size) required for merging a 'primary' line with a 'secondary' line. (Default: 0.5)">Mixed Min Overlap:</label><input type="number" id="ocr-auto-merge-mixed-min-overlap-ratio" min="0" max="1" step="0.05"></div> <h3>Advanced</h3><div class="gemini-ocr-settings-grid full-width"><label><input type="checkbox" id="gemini-ocr-debug-mode"> Debug Mode</label></div> <div class="gemini-ocr-settings-grid full-width"><label for="gemini-ocr-sites-config">Site Configurations (URL; OverflowFix; Containers...)</label><textarea id="gemini-ocr-sites-config" rows="6" placeholder="127.0.0.1; .overflow-fix; .container1; .container2\n"></textarea></div> </div> <div class="gemini-ocr-modal-footer"> <button id="gemini-ocr-purge-cache-btn" style="background-color: #c0392b;" title="Deletes all entries from the server's OCR cache file.">Purge Server Cache</button> <button id="gemini-ocr-batch-chapter-btn" style="background-color: #3498db;" title="Queues the current chapter on the server for background pre-processing.">Pre-process Chapter</button> <button id="gemini-ocr-debug-btn" style="background-color: #777;">Debug</button> <button id="gemini-ocr-close-btn" style="background-color: #555;">Close</button> <button id="gemini-ocr-save-btn" style="background-color: #3ad602;">Save & Reload</button> </div> </div> <div id="gemini-ocr-debug-modal" class="gemini-ocr-modal is-hidden"><div class="gemini-ocr-modal-header"><h2>Debug Log</h2></div><div class="gemini-ocr-modal-content"><textarea id="gemini-ocr-debug-log" readonly style="width:100%; height: 100%; resize:none;"></textarea></div><div class="gemini-ocr-modal-footer"><button id="gemini-ocr-close-debug-btn" style="background-color: #555;">Close</button></div></div> `);
