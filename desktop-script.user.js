@@ -388,82 +388,113 @@
         union(i, j) { const rootI = this.find(i); const rootJ = this.find(j); if (rootI !== rootJ) { if (this.rank[rootI] > this.rank[rootJ]) { this.parent[rootJ] = rootI; } else if (this.rank[rootI] < this.rank[rootJ]) { this.parent[rootI] = rootJ; } else { this.parent[rootJ] = rootI; this.rank[rootI]++; } return true; } return false; }
     }
 
-    function autoMergeOcrData(lines) {
-        if (!lines || lines.length < 2) return lines.map(line => [line]);
+                                     function autoMergeOcrData(lines, naturalWidth, naturalHeight) {
+        if (!lines || lines.length < 2 || !naturalWidth || !naturalHeight) return lines.map(line => [line]);
 
-        const horizontalLines = lines.filter(l => l.tightBoundingBox.width > l.tightBoundingBox.height);
-        const verticalLines = lines.filter(l => l.tightBoundingBox.width <= l.tightBoundingBox.height);
-
-        const median = (arr) => { if (arr.length === 0) return 0; const sorted = [...arr].sort((a, b) => a - b); const mid = Math.floor(sorted.length / 2); return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2; };
-
-        const initialMedianLineHeight = median(horizontalLines.map(l => l.tightBoundingBox.height * 1000));
-        const initialMedianLineWidth = median(verticalLines.map(l => l.tightBoundingBox.width * 1000));
-
-        const primaryHorizontalLines = horizontalLines.filter(l => (l.tightBoundingBox.height * 1000) >= initialMedianLineHeight * settings.autoMergeMinLineRatio);
-        const primaryVerticalLines = verticalLines.filter(l => (l.tightBoundingBox.width * 1000) >= initialMedianLineWidth * settings.autoMergeMinLineRatio);
-
-        const robustMedianLineHeight = median(primaryHorizontalLines.map(l => l.tightBoundingBox.height * 1000)) || initialMedianLineHeight || 20;
-        const robustMedianLineWidth = median(primaryVerticalLines.map(l => l.tightBoundingBox.width * 1000)) || initialMedianLineWidth || 20;
-
-        logDebug(`Auto-Merge Norms (Robust): Median H-Height=${robustMedianLineHeight.toFixed(2)}, Median V-Width=${robustMedianLineWidth.toFixed(2)}`);
-
+        const CHUNK_MAX_HEIGHT = 3000;
+        // Шаг 1: Создаём ОБРАБАТЫВАЕМЫЕ данные с ТОЧНЫМИ, нормализованными координатами
         const processedLines = lines.map((line, index) => {
             const bbox = line.tightBoundingBox;
-            const isVertical = bbox.width <= bbox.height;
-            const fontSize = isVertical ? bbox.width * 1000 : bbox.height * 1000;
-            return { ...line, originalIndex: index, isVertical, fontSize, bbox: { x: bbox.x * 1000, y: bbox.y * 1000, width: bbox.width * 1000, height: bbox.height * 1000, right: (bbox.x + bbox.width) * 1000, bottom: (bbox.y + bbox.height) * 1000 } };
+            const pixelTop = bbox.y * naturalHeight;
+            const pixelBottom = (bbox.y + bbox.height) * naturalHeight;
+            const normScale = 1000 / naturalWidth; // Коэффициент для точности
+            const normalizedBbox = {
+                x: (bbox.x * naturalWidth) * normScale,
+                y: (bbox.y * naturalHeight) * normScale,
+                width: (bbox.width * naturalWidth) * normScale,
+                height: (bbox.height * naturalHeight) * normScale
+            };
+            normalizedBbox.right = normalizedBbox.x + normalizedBbox.width;
+            normalizedBbox.bottom = normalizedBbox.y + normalizedBbox.height;
+            const isVertical = normalizedBbox.width <= normalizedBbox.height;
+            const fontSize = isVertical ? normalizedBbox.width : normalizedBbox.height;
+            // Сохраняем и исходный индекс, и точные координаты
+            return { originalIndex: index, isVertical, fontSize, bbox: normalizedBbox, pixelTop, pixelBottom };
         });
 
-        const uf = new UnionFind(lines.length);
+        processedLines.sort((a, b) => a.pixelTop - b.pixelTop);
 
-        for (let i = 0; i < processedLines.length; i++) {
-            for (let j = i + 1; j < processedLines.length; j++) {
-                const lineA = processedLines[i];
-                const lineB = processedLines[j];
-                if (lineA.isVertical !== lineB.isVertical) continue;
+        const allMergedGroups = [];
+        let currentLineIndex = 0, chunksProcessed = 0;
 
-                const isLineAPrimary = lineA.fontSize >= (lineA.isVertical ? robustMedianLineWidth : robustMedianLineHeight) * settings.autoMergeMinLineRatio;
-                const isLineBPrimary = lineB.fontSize >= (lineB.isVertical ? robustMedianLineWidth : robustMedianLineHeight) * settings.autoMergeMinLineRatio;
+        while (currentLineIndex < processedLines.length) {
+            chunksProcessed++;
+            const chunkStartIndex = currentLineIndex;
+            let chunkEndIndex = processedLines.length - 1;
 
-                let currentFontRatioThreshold = settings.autoMergeFontRatio;
-                let currentPerpTol = (lineA.isVertical ? settings.autoMergePerpTol * robustMedianLineHeight : settings.autoMergePerpTol * robustMedianLineWidth);
-                if ((isLineAPrimary && !isLineBPrimary) || (!isLineAPrimary && isLineBPrimary)) { currentFontRatioThreshold = settings.autoMergeFontRatioForMixed; }
-
-                const fontRatio = Math.max(lineA.fontSize / lineB.fontSize, lineB.fontSize / lineA.fontSize);
-                if (fontRatio > currentFontRatioThreshold) continue;
-
-                const distThreshold = lineA.isVertical ? (settings.autoMergeDistK * robustMedianLineWidth) : (settings.autoMergeDistK * robustMedianLineHeight);
-                let readingGap, perpOverlap, perpOffset;
-                const smallerPerpSize = Math.min(lineA.isVertical ? lineA.bbox.height : lineA.bbox.width, lineA.isVertical ? lineB.bbox.height : lineB.bbox.width);
-
-                if (lineA.isVertical) { readingGap = Math.max(0, Math.max(lineA.bbox.x, lineB.bbox.x) - Math.min(lineA.bbox.right, lineB.bbox.right)); perpOverlap = Math.max(0, Math.min(lineA.bbox.bottom, lineB.bbox.bottom) - Math.max(lineA.bbox.y, lineB.bbox.y)); perpOffset = Math.abs((lineA.bbox.y + lineA.bbox.height / 2) - (lineB.bbox.y + lineB.bbox.height / 2)); }
-                else { readingGap = Math.max(0, Math.max(lineA.bbox.y, lineB.bbox.y) - Math.min(lineA.bbox.bottom, lineB.bbox.bottom)); perpOverlap = Math.max(0, Math.min(lineA.bbox.right, lineB.bbox.right) - Math.max(lineA.bbox.x, lineB.bbox.x)); perpOffset = Math.abs((lineA.bbox.x + lineA.bbox.width / 2) - (lineB.bbox.x + lineB.bbox.width / 2)); }
-
-                if (readingGap > distThreshold) continue;
-                if (perpOffset > currentPerpTol && perpOverlap / smallerPerpSize < settings.autoMergeOverlapMin) continue;
-                if ((isLineAPrimary && !isLineBPrimary) || (!isLineAPrimary && isLineBPrimary)) { if (perpOverlap / smallerPerpSize < settings.autoMergeMixedMinOverlapRatio) { continue; } }
-                uf.union(i, j);
+            if (naturalHeight > CHUNK_MAX_HEIGHT) {
+                const chunkTopY = processedLines[chunkStartIndex].pixelTop;
+                for (let i = chunkStartIndex + 1; i < processedLines.length; i++) {
+                    if ((processedLines[i].pixelBottom - chunkTopY) <= CHUNK_MAX_HEIGHT) {
+                        chunkEndIndex = i;
+                    } else break;
+                }
             }
+
+            const chunkLines = processedLines.slice(chunkStartIndex, chunkEndIndex + 1);
+            const uf = new UnionFind(chunkLines.length);
+
+            // ... (вся логика UnionFind для поиска групп остаётся без изменений, она уже использует точные `bbox`)
+            const horizontalLines = chunkLines.filter(l => !l.isVertical), verticalLines = chunkLines.filter(l => l.isVertical);
+            const median = (arr) => { if (arr.length === 0) return 0; const sorted = [...arr].sort((a, b) => a - b); const mid = Math.floor(sorted.length / 2); return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2; };
+            const initialMedianLineHeight = median(horizontalLines.map(l => l.bbox.height)); const initialMedianLineWidth = median(verticalLines.map(l => l.bbox.width));
+            const primaryHorizontalLines = horizontalLines.filter(l => l.bbox.height >= initialMedianLineHeight * settings.autoMergeMinLineRatio); const primaryVerticalLines = verticalLines.filter(l => l.bbox.width >= initialMedianLineWidth * settings.autoMergeMinLineRatio);
+            const robustMedianLineHeight = median(primaryHorizontalLines.map(l => l.bbox.height)) || initialMedianLineHeight || 20; const robustMedianLineWidth = median(primaryVerticalLines.map(l => l.bbox.width)) || initialMedianLineWidth || 20;
+            for (let i = 0; i < chunkLines.length; i++) { for (let j = i + 1; j < chunkLines.length; j++) { const lineA = chunkLines[i], lineB = chunkLines[j]; if (lineA.isVertical !== lineB.isVertical) continue; const isLineAPrimary = lineA.fontSize >= (lineA.isVertical ? robustMedianLineWidth : robustMedianLineHeight) * settings.autoMergeMinLineRatio; const isLineBPrimary = lineB.fontSize >= (lineB.isVertical ? robustMedianLineWidth : robustMedianLineHeight) * settings.autoMergeMinLineRatio; let currentFontRatioThreshold = settings.autoMergeFontRatio; if ((isLineAPrimary && !isLineBPrimary) || (!isLineAPrimary && isLineBPrimary)) currentFontRatioThreshold = settings.autoMergeFontRatioForMixed; const fontRatio = Math.max(lineA.fontSize / lineB.fontSize, lineB.fontSize / lineA.fontSize); if (fontRatio > currentFontRatioThreshold) continue; const distThreshold = lineA.isVertical ? (settings.autoMergeDistK * robustMedianLineWidth) : (settings.autoMergeDistK * robustMedianLineHeight); let readingGap, perpOverlap; if (lineA.isVertical) { readingGap = Math.max(0, Math.max(lineA.bbox.x, lineB.bbox.x) - Math.min(lineA.bbox.right, lineB.bbox.right)); perpOverlap = Math.max(0, Math.min(lineA.bbox.bottom, lineB.bbox.bottom) - Math.max(lineA.bbox.y, lineB.bbox.y)); } else { readingGap = Math.max(0, Math.max(lineA.bbox.y, lineB.bbox.y) - Math.min(lineA.bbox.bottom, lineB.bbox.bottom)); perpOverlap = Math.max(0, Math.min(lineA.bbox.right, lineB.bbox.right) - Math.max(lineA.bbox.x, lineB.bbox.x)); } const smallerPerpSize = Math.min(lineA.isVertical ? lineA.bbox.height : lineA.bbox.width, lineA.isVertical ? lineB.bbox.height : lineB.bbox.width); if (readingGap > distThreshold) continue; if (perpOverlap / smallerPerpSize < settings.autoMergeOverlapMin) continue; if (((isLineAPrimary && !isLineBPrimary) || (!isLineAPrimary && isLineBPrimary)) && (perpOverlap / smallerPerpSize < settings.autoMergeMixedMinOverlapRatio)) continue; uf.union(i, j); } }
+
+            // Шаг 2: Группируем ОБРАБАТЫВАЕМЫЕ данные, а не исходные
+            const tempGroups = {};
+            for (let i = 0; i < chunkLines.length; i++) {
+                const root = uf.find(i);
+                if (!tempGroups[root]) tempGroups[root] = [];
+                tempGroups[root].push(chunkLines[i]); // Кладём объект с точными данными
+            }
+
+            // Шаг 3: Сортируем группы, используя ТОЧНЫЕ координаты из `bbox`
+            const sortedTempGroups = Object.values(tempGroups).map(group => {
+                if (group.length < 2) return group;
+
+                const groupBBox = group.reduce((acc, item) => {
+                    const b = item.bbox; // Используем точные данные
+                    if (b.x < acc.x1) acc.x1 = b.x; if (b.y < acc.y1) acc.y1 = b.y;
+                    if (b.right > acc.x2) acc.x2 = b.right; if (b.bottom > acc.y2) acc.y2 = b.bottom;
+                    return acc;
+                }, { x1: Infinity, y1: Infinity, x2: -Infinity, y2: -Infinity });
+                const isVerticalGroup = (groupBBox.y2 - groupBBox.y1) > (groupBBox.x2 - groupBBox.x1);
+
+                group.sort((a, b) => {
+                    const bA = a.bbox; // Сортируем по ТОЧНЫМ данным
+                    const bB = b.bbox; // Сортируем по ТОЧНЫМ данным
+                    if (isVerticalGroup) {
+                        const xDiff = bB.x - bA.x;
+                        return Math.abs(xDiff) > 0.1 ? xDiff : bA.y - bB.y;
+                    } else {
+                        const yDiff = bA.y - bB.y;
+                        return Math.abs(yDiff) > 0.1 ? yDiff : bA.x - bB.x;
+                    }
+                });
+                return group;
+            });
+
+            // Шаг 4: Преобразуем отсортированные группы обратно в исходный формат данных
+            const finalGroupsInChunk = sortedTempGroups.map(group =>
+                group.map(processedLine => lines[processedLine.originalIndex])
+            );
+
+            allMergedGroups.push(...finalGroupsInChunk);
+            currentLineIndex = chunkEndIndex + 1;
         }
 
-        const groups = {};
-        for (let i = 0; i < processedLines.length; i++) {
-            const root = uf.find(i);
-            if (!groups[root]) groups[root] = [];
-            groups[root].push(lines[i]);
-        }
-
-        logDebug(`Auto-Merge finished. Initial: ${lines.length}, Final groups: ${Object.keys(groups).length}`);
-        return Object.values(groups);
+        logDebug(`Auto-Merge finished. Initial: ${lines.length}, Final groups: ${allMergedGroups.length} (processed in ${chunksProcessed} chunk(s))`);
+        return allMergedGroups;
     }
-
     // --- Display & Interaction Logic ---
     function displayOcrResults(targetImg) {
         if (managedElements.has(targetImg)) return;
         let data = ocrDataCache.get(targetImg);
         if (!data || data === 'pending' || !Array.isArray(data)) return;
 
-        let dataGroups = settings.autoMergeEnabled ? autoMergeOcrData(data) : data.map(item => [item]);
+       let dataGroups = settings.autoMergeEnabled ? autoMergeOcrData(data, targetImg.naturalWidth, targetImg.naturalHeight) : data.map(item => [item]);
 
         const overlay = document.createElement('div');
         overlay.className = `gemini-ocr-decoupled-overlay interaction-mode-${settings.interactionMode}`;
@@ -515,6 +546,7 @@
                 groupWrapper.appendChild(ocrBox);
             });
             overlay.appendChild(groupWrapper);
+
         });
 
         document.body.appendChild(overlay);
@@ -630,41 +662,85 @@
         }
         logDebug(`Manually merging ${selectedGroups.length} groups.`);
 
-        const allBoxesToMerge = selectedGroups.flatMap(g => Array.from(g.querySelectorAll('.gemini-ocr-text-box')));
+        // Находим исходное изображение, чтобы получить его точные размеры
+        const [sourceImage] = [...managedElements].find(([, state]) => state.overlay === overlay) || [];
+        if (!sourceImage || !sourceImage.naturalWidth) {
+            logDebug("Merge failed: Could not find source image for precise calculations.");
+            return;
+        }
+        const { naturalWidth, naturalHeight } = sourceImage;
+        const normScale = 1000 / naturalWidth; // Тот же коэффициент для точности
 
-        const groupBBox = allBoxesToMerge.reduce((acc, box) => {
-            const b = box._ocrData.tightBoundingBox;
-            if (!b) return acc;
-            const right = b.x + b.width;
-            const bottom = b.y + b.height;
-            if (b.x < acc.x) acc.x = b.x;
-            if (b.y < acc.y) acc.y = b.y;
-            if (right > acc.right) acc.right = right;
-            if (bottom > acc.bottom) acc.bottom = bottom;
+        const allBoxElements = selectedGroups.flatMap(g => Array.from(g.querySelectorAll('.gemini-ocr-text-box')));
+
+        // Шаг 1: Создаём временный массив объектов с ТОЧНЫМИ координатами для каждого блока
+        const boxesWithPreciseCoords = allBoxElements.map(box => {
+            const rawBbox = box._ocrData.tightBoundingBox;
+            const preciseBbox = {
+                x: (rawBbox.x * naturalWidth) * normScale,
+                y: (rawBbox.y * naturalHeight) * normScale,
+                width: (rawBbox.width * naturalWidth) * normScale,
+                height: (rawBbox.height * naturalHeight) * normScale,
+            };
+            preciseBbox.right = preciseBbox.x + preciseBbox.width;
+            preciseBbox.bottom = preciseBbox.y + preciseBbox.height;
+            return { element: box, bbox: preciseBbox }; // Связываем DOM-элемент с его точными данными
+        });
+
+        // Шаг 2: Вычисляем общие границы новой группы, используя ТОЧНЫЕ координаты
+        const groupPreciseBBox = boxesWithPreciseCoords.reduce((acc, item) => {
+            const b = item.bbox;
+            if (b.x < acc.x1) acc.x1 = b.x;
+            if (b.y < acc.y1) acc.y1 = b.y;
+            if (b.right > acc.x2) acc.x2 = b.right;
+            if (b.bottom > acc.y2) acc.y2 = b.bottom;
             return acc;
-        }, { x: 1, y: 1, right: 0, bottom: 0 });
-        groupBBox.width = groupBBox.right - groupBBox.x;
-        groupBBox.height = groupBBox.bottom - groupBBox.y;
+        }, { x1: Infinity, y1: Infinity, x2: -Infinity, y2: -Infinity });
 
-        if (groupBBox.width <= 0 || groupBBox.height <= 0) {
+        // Конвертируем точные общие границы обратно в проценты для CSS
+        const groupFinalBBox = {
+            x: (groupPreciseBBox.x1 / normScale) / naturalWidth,
+            y: (groupPreciseBBox.y1 / normScale) / naturalHeight,
+            width: ((groupPreciseBBox.x2 - groupPreciseBBox.x1) / normScale) / naturalWidth,
+            height: ((groupPreciseBBox.y2 - groupPreciseBBox.y1) / normScale) / naturalHeight,
+        };
+
+        if (groupFinalBBox.width <= 0 || groupFinalBBox.height <= 0) {
             logDebug("Merge failed: Invalid bounding box calculated.");
             return;
         }
 
+        // Шаг 3: Определяем ориентацию и сортируем, используя ТОЧНЫЕ координаты
+        const isVerticalGroup = (groupPreciseBBox.y2 - groupPreciseBBox.y1) > (groupPreciseBBox.x2 - groupPreciseBBox.x1);
+        logDebug(`Manual group orientation: ${isVerticalGroup ? 'Vertical' : 'Horizontal'}. Applying reference sort...`);
+
+        boxesWithPreciseCoords.sort((a, b) => {
+            const bA = a.bbox; // Сортируем по ТОЧНЫМ данным
+            const bB = b.bbox; // Сортируем по ТОЧНЫМ данным
+            if (isVerticalGroup) {
+                const xDiff = bB.x - bA.x;
+                return Math.abs(xDiff) > 0.1 ? xDiff : bA.y - bB.y;
+            } else {
+                const yDiff = bA.y - bB.y;
+                return Math.abs(yDiff) > 0.1 ? yDiff : bA.x - bB.x;
+            }
+        });
+
+        // Шаг 4: Создаём новый контейнер группы и добавляем в него отсортированные элементы
         const newGroupWrapper = document.createElement('div');
         newGroupWrapper.className = 'gemini-ocr-group';
         Object.assign(newGroupWrapper.style, {
-            left: `${groupBBox.x * 100}%`, top: `${groupBBox.y * 100}%`,
-            width: `${groupBBox.width * 100}%`, height: `${groupBBox.height * 100}%`
+            left: `${groupFinalBBox.x * 100}%`, top: `${groupFinalBBox.y * 100}%`,
+            width: `${groupFinalBBox.width * 100}%`, height: `${groupFinalBBox.height * 100}%`
         });
 
-        allBoxesToMerge.forEach(box => {
-            const itemBBox = box._ocrData.tightBoundingBox;
-            const relativeLeft = (itemBBox.x - groupBBox.x) / groupBBox.width;
-            const relativeTop = (itemBBox.y - groupBBox.y) / groupBBox.height;
-            const relativeWidth = itemBBox.width / groupBBox.width;
-            const relativeHeight = itemBBox.height / groupBBox.height;
-
+        boxesWithPreciseCoords.forEach(item => {
+            const box = item.element;
+            const itemBBox = box._ocrData.tightBoundingBox; // Исходные %-координаты для вычисления относительной позиции
+            const relativeLeft = (itemBBox.x - groupFinalBBox.x) / groupFinalBBox.width;
+            const relativeTop = (itemBBox.y - groupFinalBBox.y) / groupFinalBBox.height;
+            const relativeWidth = itemBBox.width / groupFinalBBox.width;
+            const relativeHeight = itemBBox.height / groupFinalBBox.height;
             Object.assign(box.style, {
                 left: `${relativeLeft * 100}%`, top: `${relativeTop * 100}%`,
                 width: `${relativeWidth * 100}%`, height: `${relativeHeight * 100}%`
@@ -674,7 +750,7 @@
 
         overlay.appendChild(newGroupWrapper);
         selectedGroups.forEach(group => group.remove());
-        logDebug(`Merge complete. New group contains ${allBoxesToMerge.length} text boxes.`);
+        logDebug(`Merge complete. New group contains ${allBoxElements.length} text boxes.`);
     }
 
     // --- Anki & Batch Processing ---
@@ -791,7 +867,6 @@
                 background: var(--ocr-bg-color); border: 2px solid var(--ocr-border-color);
                 text-shadow: 0 1px 3px rgba(0,0,0,0.9); backdrop-filter: blur(3px);
                 padding: 4px; border-radius: 4px;
-                font-family: 'Noto Sans JP', sans-serif; font-weight: 600;
             }
             .gemini-ocr-text-vertical { writing-mode: vertical-rl; text-orientation: upright; }
 
@@ -823,6 +898,8 @@
             body.ocr-theme-minimal .gemini-ocr-decoupled-overlay.is-focused .gemini-ocr-group {
                  border: 1px solid rgba(255, 0, 0, 0.2);
             }
+
+
             body.ocr-theme-minimal .gemini-ocr-text-box {
                 background: transparent !important; color: transparent !important; border: none !important;
                 backdrop-filter: none !important; text-shadow: none !important; box-shadow: none !important; transform: none !important;
