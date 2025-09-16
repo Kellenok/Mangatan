@@ -791,6 +791,7 @@
                 background: var(--ocr-bg-color); border: 2px solid var(--ocr-border-color);
                 text-shadow: 0 1px 3px rgba(0,0,0,0.9); backdrop-filter: blur(3px);
                 padding: 4px; border-radius: 4px;
+                font-family: 'Noto Sans JP', sans-serif; font-weight: 600;
             }
             .gemini-ocr-text-vertical { writing-mode: vertical-rl; text-orientation: upright; }
 
