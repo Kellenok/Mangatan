@@ -11,8 +11,8 @@
 // @grant        GM_xmlhttpRequest
 // @connect      127.0.0.1
 // @connect      localhost
-// @downloadURL  https://github.com/kaihouguide/Mangatan/raw/main/desktop-script.user.js
-// @updateURL    https://github.com/kaihouguide/Mangatan/raw/main/desktop-script.user.js
+// @downloadURL  https://github.com/Kellenok/Mangatan/raw/main/desktop-script.user.js
+// @updateURL    https://github.com/Kellnok/Mangatan/raw/main/desktop-script.user.js
 // ==/UserScript==
 
 (function() {
