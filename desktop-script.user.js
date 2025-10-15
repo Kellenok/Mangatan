@@ -508,15 +508,17 @@
                 width: `${groupBBox.width * 100}%`, height: `${groupBBox.height * 100}%`
             });
 
-            groupData.forEach((item) => {
-                const originalIndex = data.indexOf(item);
-                const ocrBox = document.createElement('div');
-                ocrBox.className = 'gemini-ocr-text-box';
-                const newText = item.text.replace(/[!?]{2,}/g, (match) => {
+            groupData.forEach((item, index) => {
+            const originalIndex = data.indexOf(item);
+            const ocrBox = document.createElement('div');
+            ocrBox.className = 'gemini-ocr-text-box';
+            let newText = item.text.replace(/[!?]{2,}/g, (match) => {
                 if (match.includes('?')) { return '?'; }
                 return '!';
-                });
-                ocrBox.textContent = newText;
+            });
+                if (index === 0) {
+                newText = '\u200A' + newText;
+            } ocrBox.textContent = newText;
                 ocrBox._ocrData = item;
                 ocrBox._ocrDataIndex = originalIndex;
 
@@ -695,15 +697,22 @@
         logDebug(`Manual group orientation: ${isVerticalGroup ? 'Vertical' : 'Horizontal'}. Applying reference sort...`);
 
         boxesWithPreciseCoords.sort((a, b) => {
-            const bA = a.bbox;
-            const bB = b.bbox;
-            if (isVerticalGroup) {
-                const xDiff = bB.x - bA.x;
-                return Math.abs(xDiff) > 0.1 ? xDiff : bA.y - bB.y;
-            } else {
-                const yDiff = bA.y - bB.y;
-                return Math.abs(yDiff) > 0.1 ? yDiff : bA.x - bB.x;
-            }
+    const bA = a.bbox;
+    const bB = b.bbox;
+
+    if (isVerticalGroup) {
+        const centerA_X = bA.x + bA.width / 2;
+        const centerB_X = bB.x + bB.width / 2;
+        const avgWidth = (bA.width + bB.width) / 2;
+        if (Math.abs(centerA_X - centerB_X) < avgWidth * 0.8) {
+            return bA.y - bB.y;
+        } else {
+            return bB.x - bA.x;
+        }
+    } else {
+        const yDiff = bA.y - bB.y;
+        return Math.abs(yDiff) > 0.1 ? yDiff : bA.x - bB.x;
+    }
         });
 
         const newGroupWrapper = document.createElement('div');
@@ -713,8 +722,17 @@
             width: `${groupFinalBBox.width * 100}%`, height: `${groupFinalBBox.height * 100}%`
         });
 
-        boxesWithPreciseCoords.forEach(item => {
+        boxesWithPreciseCoords.forEach((item, index) => {
             const box = item.element;
+            if (index === 0) {
+        if (!box.textContent.startsWith('\u200A')) {
+            box.textContent = '\u200A' + box.textContent;
+        }
+    } else {
+        if (box.textContent.startsWith('\u200A')) {
+            box.textContent = box.textContent.substring(1);
+        }
+    }
             const itemBBox = box._ocrData.tightBoundingBox;
             const relativeLeft = (itemBBox.x - groupFinalBBox.x) / groupFinalBBox.width;
             const relativeTop = (itemBBox.y - groupFinalBBox.y) / groupFinalBBox.height;
