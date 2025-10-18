@@ -1,3 +1,6 @@
+```
+Add " " to "Sentence termination characters" in Yomitan for correct sending sentences to Anki
+```
 
 Welcome! This guide provides the steps to get your Google Lens-powered OCR server running for a seamless reading experience.
 
