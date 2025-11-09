@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mangatan
 // @namespace    http://tampermonkey.net/
-// @version      28
+// @version      28.1
 // @description  A universal OCR script that automatically adapts to your device. Features desktop-class auto-merging, hotkeys, and smooth rendering, combined with mobile-optimized touch controls and UI.
 // @author       1Selxo, Kellen, Gemini
 // @match        *://127.0.0.1*/*
@@ -14,6 +14,7 @@
 // @updateURL    https://github.com/kellenok/Mangatan/raw/main/mangatan.user.js
 // @downloadURL  https://github.com/kellenok/Mangatan/raw/main/mangatan.user.js
 // ==/UserScript==
+
 
 
 (function() {
@@ -268,35 +269,115 @@
     }
 
     function setupNavigationObserver() {
-        if (!IS_MOBILE) return;
-        const contentRootSelector = activeSiteConfig?.contentRootSelector;
-        if (!contentRootSelector) return;
-        const targetNode = document.querySelector(contentRootSelector);
-        if (!targetNode) return;
-        navigationObserver = new MutationObserver(() => {
-            fullCleanupAndReset();
-            setTimeout(reinitializeScript, 250);
-            navigationObserver.disconnect();
-        });
-        navigationObserver.observe(targetNode, {
-            childList: true
-        });
-        logDebug(`Robust mobile navigation observer attached to ${targetNode.id || targetNode.className}.`);
+    if (navigationObserver) {
+        navigationObserver.disconnect();
     }
 
-    function updateVisibleOverlaysPosition() {
-        for (const img of visibleImages) {
-            const state = managedElements.get(img);
-            if (state) {
-                const rect = img.getBoundingClientRect();
-                Object.assign(state.overlay.style, {
-                    top: `${rect.top}px`,
-                    left: `${rect.left}px`
-                });
+    const contentRootSelector = activeSiteConfig?.contentRootSelector;
+    let targetNode = null;
+
+    if (contentRootSelector) {
+        targetNode = document.querySelector(contentRootSelector);
+    }
+
+    if (!targetNode) {
+        targetNode = document.getElementById('root') || document.body;
+    }
+
+    if (!targetNode) {
+        logDebug('Navigation observer: target not found. Skipping.');
+        return;
+    }
+
+    const observerCallback = (mutations) => {
+        let hasRemovals = false;
+        for (const m of mutations) {
+            if (m.removedNodes && m.removedNodes.length > 0) {
+                hasRemovals = true;
+                break;
             }
         }
-        animationFrameId = requestAnimationFrame(updateVisibleOverlaysPosition);
+
+        if (hasRemovals) {
+            for (const [, state] of managedElements) {
+                if (state?.overlay) {
+                    state.overlay.style.visibility = 'hidden';
+                    state.overlay.classList.remove('is-focused');
+                    state.overlay.classList.add('is-inactive');
+                }
+            }
+            if (activeOverlay) {
+                hideActiveOverlay();
+            }
+        }
+
+        for (const container of managedContainers.keys()) {
+            if (!container.isConnected) {
+                logDebug('Detected disconnected container via navigation observer. Firing FULL RESET.');
+                navigationObserver.disconnect();
+                fullCleanupAndReset();
+                setTimeout(reinitializeScript, 250);
+                return;
+            }
+        }
+
+        for (const [img] of managedElements) {
+            if (!img.isConnected) {
+                logDebug('Detected disconnected image via navigation observer. Firing FULL RESET.');
+                navigationObserver.disconnect();
+                fullCleanupAndReset();
+                setTimeout(reinitializeScript, 250);
+                return;
+            }
+        }
+    };
+
+    navigationObserver = new MutationObserver(observerCallback);
+    navigationObserver.observe(targetNode, {
+        childList: true,
+        subtree: true
+    });
+
+    logDebug(`Navigation observer attached to ${targetNode.id || targetNode.className || targetNode.nodeName}.`);
+}
+
+    function updateVisibleOverlaysPosition() {
+    if (visibleImages.size === 0) {
+        if (animationFrameId !== null) {
+            cancelAnimationFrame(animationFrameId);
+            animationFrameId = null;
+        }
+        return;
     }
+
+    for (const img of Array.from(visibleImages)) {
+        if (!img.isConnected) {
+            visibleImages.delete(img);
+            const state = managedElements.get(img);
+            if (state) {
+                state.overlay.style.visibility = 'hidden';
+                cleanupManagedElement(img);
+            }
+            continue;
+        }
+
+        const state = managedElements.get(img);
+        if (!state) { visibleImages.delete(img); continue; }
+
+        const rect = img.getBoundingClientRect();
+        if (rect.width === 0 && rect.height === 0) {
+            state.overlay.style.visibility = 'hidden';
+            continue;
+        }
+
+        Object.assign(state.overlay.style, {
+            top: `${rect.top}px`,
+            left: `${rect.left}px`
+        });
+    }
+
+    animationFrameId = requestAnimationFrame(updateVisibleOverlaysPosition);
+}
 
     function updateOverlayDimensionsAndStyles(img, state, rect = null) {
         if (!rect) rect = img.getBoundingClientRect();
@@ -319,24 +400,27 @@
         }
     };
     const handleIntersection = (entries) => {
-        for (const entry of entries) {
-            const img = entry.target;
-            if (entry.isIntersecting) {
-                if (!visibleImages.has(img)) {
-                    visibleImages.add(img);
-                    const state = managedElements.get(img);
-                    if (state) state.overlay.style.visibility = 'visible';
-                }
-            } else {
-                if (visibleImages.has(img)) {
-                    visibleImages.delete(img);
-                    const state = managedElements.get(img);
-                    if (state) state.overlay.style.visibility = 'hidden';
-                }
+    for (const entry of entries) {
+        const img = entry.target;
+        const state = managedElements.get(img);
+        if (!state) continue;
+
+        if (entry.isIntersecting) {
+            visibleImages.add(img);
+
+            state.overlay.classList.remove('is-inactive');
+            state.overlay.style.visibility = '';
+
+            if (animationFrameId === null) {
+                animationFrameId = requestAnimationFrame(updateVisibleOverlaysPosition);
             }
-             updateVisibleOverlaysPosition();
+        } else {
+            visibleImages.delete(img);
+            state.overlay.classList.remove('is-focused');
+            if (activeOverlay === state.overlay) hideActiveOverlay();
         }
-    };
+    }
+};
     function cleanupManagedElement(img) {
         const state = managedElements.get(img);
         if (state) {
@@ -813,15 +897,28 @@
         UI.globalEditButton?.classList.remove('is-hidden');
     }
     function hideActiveOverlay() {
-        if (!activeOverlay) return;
-        activeOverlay.classList.remove('is-focused', 'has-manual-highlight', 'edit-mode-active');
+    if (!activeOverlay) return;
+
+    activeOverlay.classList.remove('is-focused', 'has-manual-highlight', 'edit-mode-active');
+
+    if (IS_MOBILE) {
         activeOverlay.classList.add('is-inactive');
-        activeOverlay.querySelectorAll('.manual-highlight, .selected-for-merge').forEach(b => b.classList.remove('manual-highlight', 'selected-for-merge'));
-        activeOverlay.querySelectorAll('.gemini-ocr-group').forEach(g => g.classList.remove('has-manual-highlight'));
-        activeMergeSelections.delete(activeOverlay);
-        UI.globalAnkiButton?.classList.add('is-hidden'); UI.globalEditButton?.classList.add('is-hidden'); UI.globalEditButton?.classList.remove('edit-active');
-        activeOverlay = null; activeImageForExport = null;
     }
+
+    activeOverlay.querySelectorAll('.manual-highlight, .selected-for-merge')
+        .forEach(b => b.classList.remove('manual-highlight', 'selected-for-merge'));
+    activeOverlay.querySelectorAll('.gemini-ocr-group')
+        .forEach(g => g.classList.remove('has-manual-highlight'));
+
+    activeMergeSelections.delete(activeOverlay);
+
+    UI.globalAnkiButton?.classList.add('is-hidden');
+    UI.globalEditButton?.classList.add('is-hidden');
+    UI.globalEditButton?.classList.remove('edit-active');
+
+    activeOverlay = null;
+    activeImageForExport = null;
+}
     function handleTouchStart(event) {
         if (event.touches.length > 1) { longPressState.valid = false; return; }
         const targetImg = event.target.closest('img');
