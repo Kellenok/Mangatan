@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         Mangatan
+// @name         Mangatan (Hybrid v29.2)
 // @namespace    http://tampermonkey.net/
-// @version      28.1
-// @description  A universal OCR script that automatically adapts to your device. Features desktop-class auto-merging, hotkeys, and smooth rendering, combined with mobile-optimized touch controls and UI.
-// @author       1Selxo, Kellen, Gemini
+// @version      29.2
+// @description  Suwayomi manga ocr
+// @author       1Selxo, Kellen, Gemini (Hybrid by AI)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -14,8 +14,6 @@
 // @updateURL    https://github.com/kellenok/Mangatan/raw/main/mangatan.user.js
 // @downloadURL  https://github.com/kellenok/Mangatan/raw/main/mangatan.user.js
 // ==/UserScript==
-
-
 
 (function() {
     'use strict';
@@ -506,16 +504,35 @@
             }
             return false;
         };
-        if (process(img.src) || attachedAttributeObservers.has(img)) return;
+
+        process(img.src);
+
+        if (attachedAttributeObservers.has(img)) return;
+
         const attrObserver = new MutationObserver((mutations) => {
-            if (mutations.some(m => m.attributeName === 'src' && process(img.src))) {
-                attrObserver.disconnect();
-                attachedAttributeObservers.delete(img);
+            let srcChanged = false;
+            for (const m of mutations) {
+                if (m.attributeName === 'src') {
+                    srcChanged = true;
+                    break;
+                }
+            }
+
+            if (srcChanged) {
+                logDebug(`Image src changed: ${img.src}`);
+                if (managedElements.has(img)) {
+                    cleanupManagedElement(img);
+                }
+
+                process(img.src);
             }
         });
+
         attrObserver.observe(img, {
-            attributes: true
+            attributes: true,
+            attributeFilter: ['src']
         });
+
         attachedAttributeObservers.set(img, attrObserver);
     }
     function primeImageForOcr(img) {
@@ -1102,7 +1119,7 @@
 
     function createUI() {
         GM_addStyle(`
-            /* --- OCR Overlay Styles (v29) --- */
+            /* --- OCR Overlay Styles (v29) --- old minimal: 1px solid var(--ocr-border-color-dim)*/
             .gemini-ocr-decoupled-overlay { position: fixed; top: 0; left: 0; z-index: 0; pointer-events: none; transition: opacity 0.2s; /* Removed will-change */ }
             .gemini-ocr-decoupled-overlay:not(.is-focused) { opacity: 0; visibility: hidden; }
             .gemini-ocr-group { pointer-events: auto; position: absolute; box-sizing: border-box;  }
@@ -1120,7 +1137,7 @@
             .gemini-ocr-group.selected-for-merge { outline: 3px solid #f1c40f !important; outline-offset: 2px; box-shadow: 0 0 12px #f1c40f; opacity: 1 !important; }
             .gemini-ocr-decoupled-overlay.is-inactive { display: none; pointer-events: none; }
             body.ocr-brightness-dark .gemini-ocr-text-box { background: rgba(29, 34, 39, 0.9); border-color: ${ACCENT_COLORS.white.main}0.5); }
-            body.ocr-theme-minimal .gemini-ocr-decoupled-overlay .gemini-ocr-group { background: transparent!important; color: transparent!; border: 1px solid var(--ocr-border-color-dim)!important; border-radius: 4px; backdrop-filter: none!important; text-shadow: none!important; box-shadow: none;}
+            body.ocr-theme-minimal .gemini-ocr-decoupled-overlay .gemini-ocr-group { background: transparent!important; color: transparent!; border: none!important; border-radius: 4px; backdrop-filter: none!important; text-shadow: none!important; box-shadow: none;}
             body.ocr-theme-minimal .gemini-ocr-decoupled-overlay .gemini-ocr-text-box { background: transparent!important; color: transparent!important; border: none; backdrop-filter: none!important; text-shadow: none!important; box-shadow: none; transform: none; }
             body.ocr-theme-minimal ::selection { background-color: rgba(0, 123, 255, 0.2); }
             .gemini-ocr-edit-action-bar { position: absolute; bottom: 0; left: 0; right: 0; display: none; justify-content: center; align-items: center; gap: 15px; padding: 10px; background: rgba(26,29,33,0.8); backdrop-filter: blur(8px); border-top: 1px solid rgba(255,255,255,0.1); }
@@ -1395,7 +1412,33 @@
         if (key === mergeKey) { for (const [overlay, selection] of activeMergeSelections.entries()) { if (selection.length > 1) { finalizeManualMerge(selection, overlay); } else { selection.forEach(g => g.classList.remove('selected-for-merge')); } } activeMergeSelections.clear(); }
         if (key === mergeKey || key === deleteKey) document.body.classList.remove('ocr-edit-mode-active');
     }
+function setupSPARouterObserver() {
+        let lastUrl = location.href;
 
+        const onUrlChange = () => {
+            const currentUrl = location.href;
+            if (currentUrl !== lastUrl) {
+                logDebug(`URL change detected: ${lastUrl} -> ${currentUrl}. Firing FULL RESET.`);
+                lastUrl = currentUrl;
+                fullCleanupAndReset();
+                setTimeout(reinitializeScript, 300);
+            }
+        };
+
+        const originalPushState = history.pushState;
+        history.pushState = function() {
+            originalPushState.apply(this, arguments);
+            onUrlChange();
+        };
+
+        const originalReplaceState = history.replaceState;
+        history.replaceState = function() {
+            originalReplaceState.apply(this, arguments);
+            onUrlChange();
+        };
+
+        window.addEventListener('popstate', onUrlChange);
+    }
     async function init() {
         const loadedSettings = await GM_getValue(SETTINGS_KEY);
         if (loadedSettings) {
@@ -1419,6 +1462,7 @@
             window.addEventListener('blur', () => document.body.classList.remove('ocr-edit-mode-active'));
         }
         populateUIFields();
+      setupSPARouterObserver();
         reinitializeScript();
         if (IS_MOBILE) setupNavigationObserver();
     }
