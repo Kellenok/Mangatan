@@ -8,8 +8,11 @@ dependencies = [
     "aiohttp>=3.12.15",
     "betterproto>=2.0.0b7",
     "chrome-lens-py>=3.2.0",
+    "flask-cors>=6.0.2",
     "flask[async]>=3.1.1",
     "oneocr>=1.0.9",
+    "owocr[lens,screenai]>=1.26.6",
+    "pillow>=11.3.0",
     "requests>=2.32.4",
     "waitress>=3.0.2",
 ]

@@ -5,3 +5,4 @@ ocr-cache.json
 *.exe
 *.pyc
 ocr-server/nuitka-crash-report.xml
+"mangatan.user_old.js" 
